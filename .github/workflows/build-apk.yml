@@ -14,18 +14,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
+      - name: Configure Android SDK
+        shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          set -e
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -48,6 +56,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -55,6 +64,7 @@ jobs:
                   mavenCentral()
               }
           }
+
           rootProject.name = "AI-CrossCheck-Android"
           include(":app")
           EOF
@@ -104,50 +114,79 @@ jobs:
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
               <uses-permission android:name="android.permission.INTERNET" />
+
               <application
                   android:allowBackup="false"
                   android:label="AI CrossCheck"
                   android:icon="@drawable/ic_launcher"
                   android:theme="@style/AppTheme"
                   android:usesCleartextTraffic="false">
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
+
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
+
                   </activity>
+
               </application>
+
           </manifest>
           EOF
 
           cat > app/src/main/res/values/styles.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
+
               <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+
                   <item name="android:fontFamily">sans</item>
                   <item name="android:statusBarColor">#F5F7FB</item>
                   <item name="android:navigationBarColor">#FFFFFF</item>
                   <item name="android:windowLightStatusBar">true</item>
                   <item name="android:colorAccent">#111827</item>
+
               </style>
+
           </resources>
           EOF
 
           cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+
+          <vector
+              xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
               android:height="108dp"
               android:viewportWidth="108"
               android:viewportHeight="108">
-              <path android:fillColor="#111827" android:pathData="M0,0h108v108h-108z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M26,26m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M82,26m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M26,82m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M82,82m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
+
+              <path
+                  android:fillColor="#111827"
+                  android:pathData="M0,0h108v108h-108z"/>
+
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M26,26m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
+
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M82,26m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
+
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M26,82m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
+
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M82,82m-9,0a9,9 0,1 0,18,0a9,9 0,1 0,-18,0"/>
+
           </vector>
           EOF
 
@@ -192,378 +231,1364 @@ jobs:
           import java.util.concurrent.Executors;
 
           public class MainActivity extends Activity {
-              private static final String API_URL = "https://openrouter.ai/api/v1/chat/completions";
-              private static final String FREE_MODEL = "openrouter/free";
+
+              private static final String API_URL =
+                      "https://openrouter.ai/api/v1/chat/completions";
+
+              private static final String FREE_MODEL =
+                      "openrouter/free";
+
               private static final int REQ_SPEECH = 901;
 
-              private EditText keyBox, questionBox, contextBox;
-              private TextView status, resultsBox, judgeBox;
-              private Button runBtn, shareBtn, copyBtn, openBtn;
+              private EditText keyBox;
+              private EditText questionBox;
+              private EditText contextBox;
+
+              private TextView status;
+              private TextView resultsBox;
+              private TextView judgeBox;
+
+              private Button runBtn;
+              private Button shareBtn;
+              private Button copyBtn;
+              private Button openBtn;
+
               private ProgressBar progress;
-              private final ExecutorService executor = Executors.newSingleThreadExecutor();
-              private final List<Item> results = new ArrayList<>();
+
+              private final ExecutorService executor =
+                      Executors.newSingleThreadExecutor();
+
+              private final List<Item> results =
+                      new ArrayList<>();
 
               private int dp(int n) {
-                  return Math.round(n * getResources().getDisplayMetrics().density);
+
+                  return Math.round(
+                          n * getResources()
+                                  .getDisplayMetrics()
+                                  .density
+                  );
               }
 
-              private TextView text(String s, int sp, boolean bold) {
-                  TextView v = new TextView(this);
+              private TextView text(
+                      String s,
+                      int sp,
+                      boolean bold
+              ) {
+
+                  TextView v =
+                          new TextView(this);
+
                   v.setText(s);
+
                   v.setTextSize(sp);
-                  v.setTextColor(Color.rgb(17,24,39));
-                  if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-                  v.setPadding(0, dp(3), 0, dp(6));
+
+                  v.setTextColor(
+                          Color.rgb(
+                                  17,
+                                  24,
+                                  39
+                          )
+                  );
+
+                  if (bold) {
+
+                      v.setTypeface(
+                              Typeface.DEFAULT,
+                              Typeface.BOLD
+                      );
+                  }
+
+                  v.setPadding(
+                          0,
+                          dp(3),
+                          0,
+                          dp(6)
+                  );
+
                   return v;
               }
 
-              private EditText edit(String hint, int minLines) {
-                  EditText e = new EditText(this);
+              private EditText edit(
+                      String hint,
+                      int minLines
+              ) {
+
+                  EditText e =
+                          new EditText(this);
+
                   e.setHint(hint);
+
                   e.setTextSize(15);
-                  e.setGravity(Gravity.TOP | Gravity.START);
+
+                  e.setGravity(
+                          Gravity.TOP |
+                          Gravity.START
+                  );
+
                   e.setMinLines(minLines);
-                  e.setPadding(dp(10), dp(8), dp(10), dp(8));
+
+                  e.setPadding(
+                          dp(10),
+                          dp(8),
+                          dp(10),
+                          dp(8)
+                  );
+
                   return e;
               }
 
-              private Button button(String label, boolean primary) {
-                  Button b = new Button(this);
+              private Button button(
+                      String label,
+                      boolean primary
+              ) {
+
+                  Button b =
+                          new Button(this);
+
                   b.setText(label);
+
                   b.setAllCaps(false);
+
                   b.setTextSize(14);
+
                   if (primary) {
-                      b.setBackgroundColor(Color.rgb(17,24,39));
-                      b.setTextColor(Color.WHITE);
+
+                      b.setBackgroundColor(
+                              Color.rgb(
+                                      17,
+                                      24,
+                                      39
+                              )
+                      );
+
+                      b.setTextColor(
+                              Color.WHITE
+                      );
                   }
+
                   return b;
               }
 
               private LinearLayout section() {
-                  LinearLayout l = new LinearLayout(this);
-                  l.setOrientation(LinearLayout.VERTICAL);
-                  l.setPadding(dp(14), dp(12), dp(14), dp(12));
-                  l.setBackgroundColor(Color.WHITE);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,
-                          LinearLayout.LayoutParams.WRAP_CONTENT);
-                  lp.setMargins(0,0,0,dp(10));
+
+                  LinearLayout l =
+                          new LinearLayout(this);
+
+                  l.setOrientation(
+                          LinearLayout.VERTICAL
+                  );
+
+                  l.setPadding(
+                          dp(14),
+                          dp(12),
+                          dp(14),
+                          dp(12)
+                  );
+
+                  l.setBackgroundColor(
+                          Color.WHITE
+                  );
+
+                  LinearLayout.LayoutParams lp =
+                          new LinearLayout.LayoutParams(
+                                  LinearLayout.LayoutParams.MATCH_PARENT,
+                                  LinearLayout.LayoutParams.WRAP_CONTENT
+                          );
+
+                  lp.setMargins(
+                          0,
+                          0,
+                          0,
+                          dp(10)
+                  );
+
                   l.setLayoutParams(lp);
+
                   return l;
               }
 
               @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
+              protected void onCreate(
+                      Bundle savedInstanceState
+              ) {
 
-                  ScrollView scroll = new ScrollView(this);
-                  scroll.setBackgroundColor(Color.rgb(245,247,251));
+                  super.onCreate(
+                          savedInstanceState
+                  );
 
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(dp(14),dp(18),dp(14),dp(36));
+                  ScrollView scroll =
+                          new ScrollView(this);
+
+                  scroll.setBackgroundColor(
+                          Color.rgb(
+                                  245,
+                                  247,
+                                  251
+                          )
+                  );
+
+                  LinearLayout root =
+                          new LinearLayout(this);
+
+                  root.setOrientation(
+                          LinearLayout.VERTICAL
+                  );
+
+                  root.setPadding(
+                          dp(14),
+                          dp(18),
+                          dp(14),
+                          dp(36)
+                  );
+
                   scroll.addView(root);
 
-                  root.addView(text("AI CrossCheck", 24, true));
-                  TextView subtitle = text("무료 AI 독립 검토 → ChatGPT 최종 판정", 13, false);
-                  subtitle.setTextColor(Color.rgb(102,112,133));
+                  root.addView(
+                          text(
+                                  "AI CrossCheck",
+                                  24,
+                                  true
+                          )
+                  );
+
+                  TextView subtitle =
+                          text(
+                                  "무료 AI 독립 검토 → ChatGPT 최종 판정",
+                                  13,
+                                  false
+                          );
+
+                  subtitle.setTextColor(
+                          Color.rgb(
+                                  102,
+                                  112,
+                                  133
+                          )
+                  );
+
                   root.addView(subtitle);
 
-                  LinearLayout api = section();
-                  api.addView(text("OpenRouter API Key",16,true));
-                  keyBox = edit("sk-or-v1-...",1);
+                  LinearLayout api =
+                          section();
+
+                  api.addView(
+                          text(
+                                  "OpenRouter API Key",
+                                  16,
+                                  true
+                          )
+                  );
+
+                  keyBox =
+                          edit(
+                                  "sk-or-v1-...",
+                                  1
+                          );
+
                   keyBox.setSingleLine(true);
-                  keyBox.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+
+                  keyBox.setInputType(
+                          InputType.TYPE_CLASS_TEXT |
+                          InputType.TYPE_TEXT_VARIATION_PASSWORD
+                  );
+
                   api.addView(keyBox);
-                  Button keyPage = button("OpenRouter Key 만들기",false);
-                  keyPage.setOnClickListener(v -> openUrl("https://openrouter.ai/keys"));
+
+                  Button keyPage =
+                          button(
+                                  "OpenRouter Key 만들기",
+                                  false
+                          );
+
+                  keyPage.setOnClickListener(
+                          v ->
+                                  openUrl(
+                                          "https://openrouter.ai/keys"
+                                  )
+                  );
+
                   api.addView(keyPage);
-                  TextView keyNote = text("Key는 앱 종료 시 저장하지 않습니다.",11,false);
-                  keyNote.setTextColor(Color.rgb(102,112,133));
+
+                  TextView keyNote =
+                          text(
+                                  "Key는 앱 종료 시 저장하지 않습니다.",
+                                  11,
+                                  false
+                          );
+
+                  keyNote.setTextColor(
+                          Color.rgb(
+                                  102,
+                                  112,
+                                  133
+                          )
+                  );
+
                   api.addView(keyNote);
+
                   root.addView(api);
 
-                  LinearLayout q = section();
-                  q.addView(text("질문",16,true));
-                  questionBox = edit("예: 200V BCD에서 10V/20V gate option이 필요한 실제 application과 기술적 이유를 사실 기반으로 분석해줘.",5);
-                  q.addView(questionBox);
+                  LinearLayout q =
+                          section();
 
-                  LinearLayout qButtons = new LinearLayout(this);
-                  qButtons.setOrientation(LinearLayout.HORIZONTAL);
-                  Button voice = button("🎙 음성 입력",false);
-                  Button clear = button("지우기",false);
-                  qButtons.addView(voice,new LinearLayout.LayoutParams(0,dp(48),1f));
-                  qButtons.addView(clear,new LinearLayout.LayoutParams(0,dp(48),1f));
-                  q.addView(qButtons);
+                  q.addView(
+                          text(
+                                  "질문",
+                                  16,
+                                  true
+                          )
+                  );
 
-                  q.addView(text("선택 Context",14,true));
-                  contextBox = edit("외부 전송 가능한 내용만 입력. 회사/고객 기밀은 익명화 권장.",3);
-                  q.addView(contextBox);
+                  questionBox =
+                          edit(
+                                  "예: 200V BCD에서 10V/20V gate option이 필요한 실제 application과 기술적 이유를 사실 기반으로 분석해줘.",
+                                  5
+                          );
+
+                  q.addView(
+                          questionBox
+                  );
+
+                  LinearLayout qButtons =
+                          new LinearLayout(this);
+
+                  qButtons.setOrientation(
+                          LinearLayout.HORIZONTAL
+                  );
+
+                  Button voice =
+                          button(
+                                  "🎙 음성 입력",
+                                  false
+                          );
+
+                  Button clear =
+                          button(
+                                  "지우기",
+                                  false
+                          );
+
+                  qButtons.addView(
+                          voice,
+                          new LinearLayout.LayoutParams(
+                                  0,
+                                  dp(48),
+                                  1f
+                          )
+                  );
+
+                  qButtons.addView(
+                          clear,
+                          new LinearLayout.LayoutParams(
+                                  0,
+                                  dp(48),
+                                  1f
+                          )
+                  );
+
+                  q.addView(
+                          qButtons
+                  );
+
+                  q.addView(
+                          text(
+                                  "선택 Context",
+                                  14,
+                                  true
+                          )
+                  );
+
+                  contextBox =
+                          edit(
+                                  "외부 전송 가능한 내용만 입력. 회사/고객 기밀은 익명화 권장.",
+                                  3
+                          );
+
+                  q.addView(
+                          contextBox
+                  );
+
                   root.addView(q);
 
-                  voice.setOnClickListener(v -> speech());
-                  clear.setOnClickListener(v -> {
-                      questionBox.setText("");
-                      contextBox.setText("");
-                  });
+                  voice.setOnClickListener(
+                          v -> speech()
+                  );
 
-                  LinearLayout run = section();
-                  runBtn = button("무료 AI 3개 Cross-check 실행",true);
-                  run.addView(runBtn,new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,dp(54)));
-                  progress = new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+                  clear.setOnClickListener(
+                          v -> {
+
+                              questionBox.setText("");
+
+                              contextBox.setText("");
+                          }
+                  );
+
+                  LinearLayout run =
+                          section();
+
+                  runBtn =
+                          button(
+                                  "무료 AI 3개 Cross-check 실행",
+                                  true
+                          );
+
+                  run.addView(
+                          runBtn,
+                          new LinearLayout.LayoutParams(
+                                  LinearLayout.LayoutParams.MATCH_PARENT,
+                                  dp(54)
+                          )
+                  );
+
+                  progress =
+                          new ProgressBar(
+                                  this,
+                                  null,
+                                  android.R.attr.progressBarStyleHorizontal
+                          );
+
                   progress.setMax(3);
-                  progress.setVisibility(View.GONE);
+
+                  progress.setVisibility(
+                          View.GONE
+                  );
+
                   run.addView(progress);
-                  status = text("준비",13,false);
-                  status.setTextColor(Color.rgb(102,112,133));
+
+                  status =
+                          text(
+                                  "준비",
+                                  13,
+                                  false
+                          );
+
+                  status.setTextColor(
+                          Color.rgb(
+                                  102,
+                                  112,
+                                  133
+                          )
+                  );
+
                   run.addView(status);
+
                   root.addView(run);
 
-                  LinearLayout out = section();
-                  out.addView(text("Cross-check 결과",16,true));
-                  resultsBox = text("아직 결과가 없습니다.",14,false);
-                  resultsBox.setTextIsSelectable(true);
-                  out.addView(resultsBox);
+                  LinearLayout out =
+                          section();
+
+                  out.addView(
+                          text(
+                                  "Cross-check 결과",
+                                  16,
+                                  true
+                          )
+                  );
+
+                  resultsBox =
+                          text(
+                                  "아직 결과가 없습니다.",
+                                  14,
+                                  false
+                          );
+
+                  resultsBox.setTextIsSelectable(
+                          true
+                  );
+
+                  out.addView(
+                          resultsBox
+                  );
+
                   root.addView(out);
 
-                  LinearLayout judge = section();
-                  judge.addView(text("ChatGPT 최종 Judge 전달문",16,true));
-                  judgeBox = text("Cross-check 완료 후 자동 생성됩니다.",13,false);
-                  judgeBox.setTextIsSelectable(true);
-                  judge.addView(judgeBox);
+                  LinearLayout judge =
+                          section();
 
-                  LinearLayout actions = new LinearLayout(this);
-                  actions.setOrientation(LinearLayout.HORIZONTAL);
-                  shareBtn = button("공유 → ChatGPT",true);
-                  copyBtn = button("복사",false);
-                  actions.addView(shareBtn,new LinearLayout.LayoutParams(0,dp(50),1.5f));
-                  actions.addView(copyBtn,new LinearLayout.LayoutParams(0,dp(50),1f));
+                  judge.addView(
+                          text(
+                                  "ChatGPT 최종 Judge 전달문",
+                                  16,
+                                  true
+                          )
+                  );
+
+                  judgeBox =
+                          text(
+                                  "Cross-check 완료 후 자동 생성됩니다.",
+                                  13,
+                                  false
+                          );
+
+                  judgeBox.setTextIsSelectable(
+                          true
+                  );
+
+                  judge.addView(
+                          judgeBox
+                  );
+
+                  LinearLayout actions =
+                          new LinearLayout(this);
+
+                  actions.setOrientation(
+                          LinearLayout.HORIZONTAL
+                  );
+
+                  shareBtn =
+                          button(
+                                  "공유 → ChatGPT",
+                                  true
+                          );
+
+                  copyBtn =
+                          button(
+                                  "복사",
+                                  false
+                          );
+
+                  actions.addView(
+                          shareBtn,
+                          new LinearLayout.LayoutParams(
+                                  0,
+                                  dp(50),
+                                  1.5f
+                          )
+                  );
+
+                  actions.addView(
+                          copyBtn,
+                          new LinearLayout.LayoutParams(
+                                  0,
+                                  dp(50),
+                                  1f
+                          )
+                  );
+
                   judge.addView(actions);
-                  openBtn = button("ChatGPT 열기",false);
-                  judge.addView(openBtn,new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,dp(48)));
 
-                  shareBtn.setEnabled(false);
-                  copyBtn.setEnabled(false);
-                  openBtn.setEnabled(false);
+                  openBtn =
+                          button(
+                                  "ChatGPT 열기",
+                                  false
+                          );
 
-                  shareBtn.setOnClickListener(v -> share());
-                  copyBtn.setOnClickListener(v -> copyJudge());
-                  openBtn.setOnClickListener(v -> {
-                      copyJudge();
-                      openUrl("https://chatgpt.com/");
-                  });
+                  judge.addView(
+                          openBtn,
+                          new LinearLayout.LayoutParams(
+                                  LinearLayout.LayoutParams.MATCH_PARENT,
+                                  dp(48)
+                          )
+                  );
+
+                  shareBtn.setEnabled(
+                          false
+                  );
+
+                  copyBtn.setEnabled(
+                          false
+                  );
+
+                  openBtn.setEnabled(
+                          false
+                  );
+
+                  shareBtn.setOnClickListener(
+                          v -> share()
+                  );
+
+                  copyBtn.setOnClickListener(
+                          v -> copyJudge()
+                  );
+
+                  openBtn.setOnClickListener(
+                          v -> {
+
+                              copyJudge();
+
+                              openUrl(
+                                      "https://chatgpt.com/"
+                              );
+                          }
+                  );
 
                   root.addView(judge);
-                  setContentView(scroll);
 
-                  runBtn.setOnClickListener(v -> runChecks());
+                  setContentView(
+                          scroll
+                  );
+
+                  runBtn.setOnClickListener(
+                          v -> runChecks()
+                  );
               }
 
               private void speech() {
+
                   try {
-                      Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,Locale.KOREAN.toLanguageTag());
-                      i.putExtra(RecognizerIntent.EXTRA_PROMPT,"질문을 말하세요");
-                      startActivityForResult(i,REQ_SPEECH);
+
+                      Intent i =
+                              new Intent(
+                                      RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+                              );
+
+                      i.putExtra(
+                              RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                              RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                      );
+
+                      i.putExtra(
+                              RecognizerIntent.EXTRA_LANGUAGE,
+                              Locale.KOREAN.toLanguageTag()
+                      );
+
+                      i.putExtra(
+                              RecognizerIntent.EXTRA_PROMPT,
+                              "질문을 말하세요"
+                      );
+
+                      startActivityForResult(
+                              i,
+                              REQ_SPEECH
+                      );
+
                   } catch (Exception e) {
-                      toast("음성 입력을 시작할 수 없습니다.");
+
+                      toast(
+                              "음성 입력을 시작할 수 없습니다."
+                      );
                   }
               }
 
               @Override
-              protected void onActivityResult(int requestCode,int resultCode,Intent data) {
-                  super.onActivityResult(requestCode,resultCode,data);
-                  if (requestCode==REQ_SPEECH && resultCode==RESULT_OK && data!=null) {
-                      ArrayList<String> xs = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-                      if (xs!=null && !xs.isEmpty()) {
-                          String old = questionBox.getText().toString().trim();
-                          questionBox.setText(old.isEmpty()?xs.get(0):old+" "+xs.get(0));
-                          questionBox.setSelection(questionBox.getText().length());
+              protected void onActivityResult(
+                      int requestCode,
+                      int resultCode,
+                      Intent data
+              ) {
+
+                  super.onActivityResult(
+                          requestCode,
+                          resultCode,
+                          data
+                  );
+
+                  if (
+                          requestCode == REQ_SPEECH &&
+                          resultCode == RESULT_OK &&
+                          data != null
+                  ) {
+
+                      ArrayList<String> xs =
+                              data.getStringArrayListExtra(
+                                      RecognizerIntent.EXTRA_RESULTS
+                              );
+
+                      if (
+                              xs != null &&
+                              !xs.isEmpty()
+                      ) {
+
+                          String old =
+                                  questionBox
+                                          .getText()
+                                          .toString()
+                                          .trim();
+
+                          questionBox.setText(
+                                  old.isEmpty()
+                                          ? xs.get(0)
+                                          : old + " " + xs.get(0)
+                          );
+
+                          questionBox.setSelection(
+                                  questionBox
+                                          .getText()
+                                          .length()
+                          );
                       }
                   }
               }
 
               private void runChecks() {
-                  final String key = keyBox.getText().toString().trim();
-                  final String q = questionBox.getText().toString().trim();
-                  final String ctx = contextBox.getText().toString().trim();
 
-                  if (key.isEmpty()) { toast("OpenRouter API Key를 입력하세요."); return; }
-                  if (q.isEmpty()) { toast("질문을 입력하세요."); return; }
+                  final String key =
+                          keyBox
+                                  .getText()
+                                  .toString()
+                                  .trim();
 
-                  runBtn.setEnabled(false);
-                  shareBtn.setEnabled(false);
-                  copyBtn.setEnabled(false);
-                  openBtn.setEnabled(false);
+                  final String q =
+                          questionBox
+                                  .getText()
+                                  .toString()
+                                  .trim();
+
+                  final String ctx =
+                          contextBox
+                                  .getText()
+                                  .toString()
+                                  .trim();
+
+                  if (key.isEmpty()) {
+
+                      toast(
+                              "OpenRouter API Key를 입력하세요."
+                      );
+
+                      return;
+                  }
+
+                  if (q.isEmpty()) {
+
+                      toast(
+                              "질문을 입력하세요."
+                      );
+
+                      return;
+                  }
+
+                  runBtn.setEnabled(
+                          false
+                  );
+
+                  shareBtn.setEnabled(
+                          false
+                  );
+
+                  copyBtn.setEnabled(
+                          false
+                  );
+
+                  openBtn.setEnabled(
+                          false
+                  );
+
                   progress.setProgress(0);
-                  progress.setVisibility(View.VISIBLE);
+
+                  progress.setVisibility(
+                          View.VISIBLE
+                  );
+
                   results.clear();
-                  resultsBox.setText("실행 중...");
+
+                  resultsBox.setText(
+                          "실행 중..."
+                  );
 
                   final String[] roles = {
+
                           "Skeptical fact checker. Focus on unsupported factual claims, numerical values, source quality, and what cannot be concluded.",
+
                           "Alternative analyst. Look for materially different explanations, counterexamples, or interpretations the primary answer might miss.",
+
                           "Technical peer reviewer. Identify hidden assumptions, edge cases, missing requirements, and technical failure modes."
                   };
 
-                  executor.submit(() -> {
-                      for (int i=0;i<3;i++) {
-                          final int n=i;
-                          runOnUiThread(() -> status.setText("Cross-check "+(n+1)+"/3 실행 중..."));
-                          try {
-                              results.add(call(key,q,ctx,roles[i]));
-                          } catch (Exception e) {
-                              results.add(new Item("ERROR","호출 실패: "+e.getMessage()));
-                          }
-                          runOnUiThread(() -> {
-                              progress.setProgress(n+1);
-                              renderResults();
-                          });
-                      }
+                  executor.submit(
+                          () -> {
 
-                      final String judge = buildJudge(q,ctx);
-                      runOnUiThread(() -> {
-                          judgeBox.setText(judge);
-                          status.setText("완료. ChatGPT로 공유하세요.");
-                          runBtn.setEnabled(true);
-                          shareBtn.setEnabled(true);
-                          copyBtn.setEnabled(true);
-                          openBtn.setEnabled(true);
-                          progress.setVisibility(View.GONE);
-                      });
-                  });
+                              for (
+                                      int i = 0;
+                                      i < 3;
+                                      i++
+                              ) {
+
+                                  final int n = i;
+
+                                  runOnUiThread(
+                                          () ->
+                                                  status.setText(
+                                                          "Cross-check " +
+                                                          (n + 1) +
+                                                          "/3 실행 중..."
+                                                  )
+                                  );
+
+                                  try {
+
+                                      results.add(
+                                              call(
+                                                      key,
+                                                      q,
+                                                      ctx,
+                                                      roles[i]
+                                              )
+                                      );
+
+                                  } catch (Exception e) {
+
+                                      results.add(
+                                              new Item(
+                                                      "ERROR",
+                                                      "호출 실패: " +
+                                                      e.getMessage()
+                                              )
+                                      );
+                                  }
+
+                                  runOnUiThread(
+                                          () -> {
+
+                                              progress.setProgress(
+                                                      n + 1
+                                              );
+
+                                              renderResults();
+                                          }
+                                  );
+                              }
+
+                              final String judge =
+                                      buildJudge(
+                                              q,
+                                              ctx
+                                      );
+
+                              runOnUiThread(
+                                      () -> {
+
+                                          judgeBox.setText(
+                                                  judge
+                                          );
+
+                                          status.setText(
+                                                  "완료. ChatGPT로 공유하세요."
+                                          );
+
+                                          runBtn.setEnabled(
+                                                  true
+                                          );
+
+                                          shareBtn.setEnabled(
+                                                  true
+                                          );
+
+                                          copyBtn.setEnabled(
+                                                  true
+                                          );
+
+                                          openBtn.setEnabled(
+                                                  true
+                                          );
+
+                                          progress.setVisibility(
+                                                  View.GONE
+                                          );
+                                      }
+                              );
+                          }
+                  );
               }
 
-              private Item call(String key,String question,String context,String role) throws Exception {
-                  JSONObject body = new JSONObject();
-                  body.put("model",FREE_MODEL);
-                  body.put("temperature",0.25);
-                  body.put("max_tokens",2200);
+              private Item call(
+                      String key,
+                      String question,
+                      String context,
+                      String role
+              ) throws Exception {
+
+                  JSONObject body =
+                          new JSONObject();
+
+                  body.put(
+                          "model",
+                          FREE_MODEL
+                  );
+
+                  body.put(
+                          "temperature",
+                          0.25
+                  );
+
+                  body.put(
+                          "max_tokens",
+                          2200
+                  );
 
                   String sys =
-                          "You are an independent reviewer used to cross-check a primary AI answer.\n"+
-                          "Assigned role: "+role+"\n\n"+
-                          "Rules:\n"+
-                          "- Be fact-first.\n"+
-                          "- Never invent numbers, specifications, dates, citations, URLs, or sources.\n"+
-                          "- Clearly mark uncertainty and claims needing verification.\n"+
-                          "- Distinguish facts from inference.\n"+
-                          "- Do not simply agree with the presumed main AI.\n"+
+
+                          "You are an independent reviewer used to cross-check a primary AI answer.\n" +
+
+                          "Assigned role: " +
+                          role +
+                          "\n\n" +
+
+                          "Rules:\n" +
+
+                          "- Be fact-first.\n" +
+
+                          "- Never invent numbers, specifications, dates, citations, URLs, or sources.\n" +
+
+                          "- Clearly mark uncertainty and claims needing verification.\n" +
+
+                          "- Distinguish facts from inference.\n" +
+
+                          "- Do not simply agree with the presumed main AI.\n" +
+
                           "- Respond in Korean unless the user explicitly requests another language.";
 
-                  String usr = context.isEmpty()?question:
-                          "[CONTEXT]\n"+context+"\n\n[QUESTION]\n"+question;
+                  String usr =
+                          context.isEmpty()
+                                  ? question
+                                  :
+                                  "[CONTEXT]\n" +
+                                  context +
+                                  "\n\n[QUESTION]\n" +
+                                  question;
 
-                  JSONArray msgs = new JSONArray();
-                  msgs.put(new JSONObject().put("role","system").put("content",sys));
-                  msgs.put(new JSONObject().put("role","user").put("content",usr));
-                  body.put("messages",msgs);
+                  JSONArray msgs =
+                          new JSONArray();
 
-                  HttpURLConnection c=(HttpURLConnection)new URL(API_URL).openConnection();
-                  c.setRequestMethod("POST");
-                  c.setConnectTimeout(30000);
-                  c.setReadTimeout(180000);
-                  c.setDoOutput(true);
-                  c.setRequestProperty("Authorization","Bearer "+key);
-                  c.setRequestProperty("Content-Type","application/json");
-                  c.setRequestProperty("X-Title","AI CrossCheck Android");
+                  msgs.put(
+                          new JSONObject()
+                                  .put(
+                                          "role",
+                                          "system"
+                                  )
+                                  .put(
+                                          "content",
+                                          sys
+                                  )
+                  );
 
-                  byte[] bytes=body.toString().getBytes(StandardCharsets.UTF_8);
-                  try(OutputStream os=c.getOutputStream()) { os.write(bytes); }
+                  msgs.put(
+                          new JSONObject()
+                                  .put(
+                                          "role",
+                                          "user"
+                                  )
+                                  .put(
+                                          "content",
+                                          usr
+                                  )
+                  );
 
-                  int code=c.getResponseCode();
-                  InputStream is=(code>=200&&code<300)?c.getInputStream():c.getErrorStream();
-                  String raw=readAll(is);
-                  if(code<200||code>=300) throw new Exception("HTTP "+code+": "+raw);
+                  body.put(
+                          "messages",
+                          msgs
+                  );
 
-                  JSONObject data=new JSONObject(raw);
-                  JSONArray choices=data.optJSONArray("choices");
-                  if(choices==null||choices.length()==0) throw new Exception("응답 없음");
+                  HttpURLConnection c =
+                          (HttpURLConnection)
+                                  new URL(
+                                          API_URL
+                                  ).openConnection();
 
-                  JSONObject msg=choices.getJSONObject(0).optJSONObject("message");
-                  String txt=msg==null?"":msg.optString("content","");
-                  if(txt.trim().isEmpty()) txt="(빈 응답)";
-                  return new Item(data.optString("model",FREE_MODEL),txt);
+                  c.setRequestMethod(
+                          "POST"
+                  );
+
+                  c.setConnectTimeout(
+                          30000
+                  );
+
+                  c.setReadTimeout(
+                          180000
+                  );
+
+                  c.setDoOutput(
+                          true
+                  );
+
+                  c.setRequestProperty(
+                          "Authorization",
+                          "Bearer " + key
+                  );
+
+                  c.setRequestProperty(
+                          "Content-Type",
+                          "application/json"
+                  );
+
+                  c.setRequestProperty(
+                          "X-Title",
+                          "AI CrossCheck Android"
+                  );
+
+                  byte[] bytes =
+                          body.toString()
+                                  .getBytes(
+                                          StandardCharsets.UTF_8
+                                  );
+
+                  try (
+                          OutputStream os =
+                                  c.getOutputStream()
+                  ) {
+
+                      os.write(
+                              bytes
+                      );
+                  }
+
+                  int code =
+                          c.getResponseCode();
+
+                  InputStream is =
+                          (
+                                  code >= 200 &&
+                                  code < 300
+                          )
+                                  ? c.getInputStream()
+                                  : c.getErrorStream();
+
+                  String raw =
+                          readAll(
+                                  is
+                          );
+
+                  if (
+                          code < 200 ||
+                          code >= 300
+                  ) {
+
+                      throw new Exception(
+                              "HTTP " +
+                              code +
+                              ": " +
+                              raw
+                      );
+                  }
+
+                  JSONObject data =
+                          new JSONObject(
+                                  raw
+                          );
+
+                  JSONArray choices =
+                          data.optJSONArray(
+                                  "choices"
+                          );
+
+                  if (
+                          choices == null ||
+                          choices.length() == 0
+                  ) {
+
+                      throw new Exception(
+                              "응답 없음"
+                      );
+                  }
+
+                  JSONObject msg =
+                          choices
+                                  .getJSONObject(0)
+                                  .optJSONObject(
+                                          "message"
+                                  );
+
+                  String txt =
+                          msg == null
+                                  ? ""
+                                  : msg.optString(
+                                          "content",
+                                          ""
+                                  );
+
+                  if (
+                          txt.trim().isEmpty()
+                  ) {
+
+                      txt =
+                              "(빈 응답)";
+                  }
+
+                  return new Item(
+                          data.optString(
+                                  "model",
+                                  FREE_MODEL
+                          ),
+                          txt
+                  );
               }
 
-              private String readAll(InputStream is) throws Exception {
-                  StringBuilder sb=new StringBuilder();
-                  try(BufferedReader br=new BufferedReader(new InputStreamReader(is,StandardCharsets.UTF_8))) {
+              private String readAll(
+                      InputStream is
+              ) throws Exception {
+
+                  StringBuilder sb =
+                          new StringBuilder();
+
+                  try (
+                          BufferedReader br =
+                                  new BufferedReader(
+                                          new InputStreamReader(
+                                                  is,
+                                                  StandardCharsets.UTF_8
+                                          )
+                                  )
+                  ) {
+
                       String line;
-                      while((line=br.readLine())!=null) sb.append(line).append('\n');
+
+                      while (
+                              (line = br.readLine()) != null
+                      ) {
+
+                          sb.append(
+                                  line
+                          ).append(
+                                  '\n'
+                          );
+                      }
                   }
+
                   return sb.toString();
               }
 
               private void renderResults() {
-                  StringBuilder sb=new StringBuilder();
-                  for(int i=0;i<results.size();i++) {
-                      Item x=results.get(i);
-                      sb.append("===== Cross-check ").append(i+1).append(" =====\n");
-                      sb.append("MODEL: ").append(x.model).append("\n\n");
-                      sb.append(x.text).append("\n\n");
+
+                  StringBuilder sb =
+                          new StringBuilder();
+
+                  for (
+                          int i = 0;
+                          i < results.size();
+                          i++
+                  ) {
+
+                      Item x =
+                              results.get(i);
+
+                      sb.append(
+                              "===== Cross-check "
+                      ).append(
+                              i + 1
+                      ).append(
+                              " =====\n"
+                      );
+
+                      sb.append(
+                              "MODEL: "
+                      ).append(
+                              x.model
+                      ).append(
+                              "\n\n"
+                      );
+
+                      sb.append(
+                              x.text
+                      ).append(
+                              "\n\n"
+                      );
                   }
-                  resultsBox.setText(sb.toString());
+
+                  resultsBox.setText(
+                          sb.toString()
+                  );
               }
 
-              private String buildJudge(String q,String ctx) {
-                  StringBuilder sb=new StringBuilder();
-                  sb.append("아래는 같은 질문을 여러 무료 AI에 독립적으로 크로스체크한 결과다.\n");
-                  sb.append("당신(ChatGPT)이 최종 Judge 역할을 해줘.\n\n");
-                  sb.append("규칙:\n");
-                  sb.append("- AI 다수결을 사실로 취급하지 말 것.\n");
-                  sb.append("- 서로 다른 주장, 수치, 원인 해석을 claim 단위로 분리할 것.\n");
-                  sb.append("- 최신성/외부 검증이 필요한 사실은 영문 Primary Source를 웹에서 확인할 것.\n");
-                  sb.append("- 검증되지 않는 내용은 '확인 필요' 또는 '확인불가'로 표시할 것.\n");
-                  sb.append("- 유효한 소수 의견이나 반례를 버리지 말 것.\n");
-                  sb.append("- 마지막에는 원 질문에 직접 답할 것.\n\n");
-                  sb.append("[ORIGINAL QUESTION]\n").append(q).append("\n\n");
-                  if(!ctx.isEmpty()) sb.append("[CONTEXT]\n").append(ctx).append("\n\n");
-                  for(int i=0;i<results.size();i++) {
-                      Item x=results.get(i);
-                      sb.append("===== CROSS-CHECK ").append(i+1).append(" / ").append(x.model).append(" =====\n");
-                      sb.append(x.text).append("\n\n");
+              private String buildJudge(
+                      String q,
+                      String ctx
+              ) {
+
+                  StringBuilder sb =
+                          new StringBuilder();
+
+                  sb.append(
+                          "아래는 같은 질문을 여러 무료 AI에 독립적으로 크로스체크한 결과다.\n"
+                  );
+
+                  sb.append(
+                          "당신(ChatGPT)이 최종 Judge 역할을 해줘.\n\n"
+                  );
+
+                  sb.append(
+                          "규칙:\n"
+                  );
+
+                  sb.append(
+                          "- AI 다수결을 사실로 취급하지 말 것.\n"
+                  );
+
+                  sb.append(
+                          "- 서로 다른 주장, 수치, 원인 해석을 claim 단위로 분리할 것.\n"
+                  );
+
+                  sb.append(
+                          "- 최신성/외부 검증이 필요한 사실은 영문 Primary Source를 웹에서 확인할 것.\n"
+                  );
+
+                  sb.append(
+                          "- 검증되지 않는 내용은 '확인 필요' 또는 '확인불가'로 표시할 것.\n"
+                  );
+
+                  sb.append(
+                          "- 유효한 소수 의견이나 반례를 버리지 말 것.\n"
+                  );
+
+                  sb.append(
+                          "- 마지막에는 원 질문에 직접 답할 것.\n\n"
+                  );
+
+                  sb.append(
+                          "[ORIGINAL QUESTION]\n"
+                  ).append(
+                          q
+                  ).append(
+                          "\n\n"
+                  );
+
+                  if (
+                          !ctx.isEmpty()
+                  ) {
+
+                      sb.append(
+                              "[CONTEXT]\n"
+                      ).append(
+                              ctx
+                      ).append(
+                              "\n\n"
+                      );
                   }
+
+                  for (
+                          int i = 0;
+                          i < results.size();
+                          i++
+                  ) {
+
+                      Item x =
+                              results.get(i);
+
+                      sb.append(
+                              "===== CROSS-CHECK "
+                      ).append(
+                              i + 1
+                      ).append(
+                              " / "
+                      ).append(
+                              x.model
+                      ).append(
+                              " =====\n"
+                      );
+
+                      sb.append(
+                              x.text
+                      ).append(
+                              "\n\n"
+                      );
+                  }
+
                   return sb.toString();
               }
 
               private void copyJudge() {
-                  String s=judgeBox.getText().toString();
-                  ClipboardManager cm=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
-                  cm.setPrimaryClip(ClipData.newPlainText("AI CrossCheck",s));
-                  toast("복사했습니다.");
+
+                  String s =
+                          judgeBox
+                                  .getText()
+                                  .toString();
+
+                  ClipboardManager cm =
+                          (ClipboardManager)
+                                  getSystemService(
+                                          Context.CLIPBOARD_SERVICE
+                                  );
+
+                  cm.setPrimaryClip(
+                          ClipData.newPlainText(
+                                  "AI CrossCheck",
+                                  s
+                          )
+                  );
+
+                  toast(
+                          "복사했습니다."
+                  );
               }
 
               private void share() {
-                  Intent i=new Intent(Intent.ACTION_SEND);
-                  i.setType("text/plain");
-                  i.putExtra(Intent.EXTRA_TEXT,judgeBox.getText().toString());
-                  i.putExtra(Intent.EXTRA_SUBJECT,"AI CrossCheck → ChatGPT");
-                  startActivity(Intent.createChooser(i,"ChatGPT 또는 다른 앱으로 공유"));
+
+                  Intent i =
+                          new Intent(
+                                  Intent.ACTION_SEND
+                          );
+
+                  i.setType(
+                          "text/plain"
+                  );
+
+                  i.putExtra(
+                          Intent.EXTRA_TEXT,
+                          judgeBox
+                                  .getText()
+                                  .toString()
+                  );
+
+                  i.putExtra(
+                          Intent.EXTRA_SUBJECT,
+                          "AI CrossCheck → ChatGPT"
+                  );
+
+                  startActivity(
+                          Intent.createChooser(
+                                  i,
+                                  "ChatGPT 또는 다른 앱으로 공유"
+                          )
+                  );
               }
 
-              private void openUrl(String s) {
-                  try { startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(s))); }
-                  catch(Exception e) { toast("브라우저를 열 수 없습니다."); }
+              private void openUrl(
+                      String s
+              ) {
+
+                  try {
+
+                      startActivity(
+                              new Intent(
+                                      Intent.ACTION_VIEW,
+                                      Uri.parse(s)
+                              )
+                      );
+
+                  } catch (Exception e) {
+
+                      toast(
+                              "브라우저를 열 수 없습니다."
+                      );
+                  }
               }
 
-              private void toast(String s) {
-                  Toast.makeText(this,s,Toast.LENGTH_SHORT).show();
+              private void toast(
+                      String s
+              ) {
+
+                  Toast.makeText(
+                          this,
+                          s,
+                          Toast.LENGTH_SHORT
+                  ).show();
               }
 
               @Override
               protected void onDestroy() {
+
                   executor.shutdownNow();
+
                   super.onDestroy();
               }
 
               private static class Item {
+
                   final String model;
+
                   final String text;
-                  Item(String model,String text) { this.model=model; this.text=text; }
+
+                  Item(
+                          String model,
+                          String text
+                  ) {
+
+                      this.model =
+                              model;
+
+                      this.text =
+                              text;
+                  }
               }
           }
           EOF
