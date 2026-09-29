@@ -5,7 +5,6 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'CURRENT_VERSION.txt'
       - 'Secmail_Reader_Probe_v*_source.zip'
       - '.github/workflows/build-secmail-probe-from-zip.yml'
 
@@ -17,18 +16,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read current version
+      - name: Select latest source version
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '\r\n ' < CURRENT_VERSION.txt)"
-          test -n "$VERSION"
-          ZIP="Secmail_Reader_Probe_${VERSION}_source.zip"
-          PROJECT="Secmail_Reader_Probe_${VERSION}"
+          ZIP="$(printf '%s\n' Secmail_Reader_Probe_v*_source.zip | sort -V | tail -n 1)"
           test -f "$ZIP"
+          VERSION="${ZIP#Secmail_Reader_Probe_}"
+          VERSION="${VERSION%_source.zip}"
+          PROJECT="Secmail_Reader_Probe_${VERSION}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          echo "Selected $ZIP"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
