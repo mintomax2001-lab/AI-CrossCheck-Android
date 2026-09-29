@@ -88,8 +88,8 @@ jobs:
         with:
           name: Secmail_Reader_Probe_${{ env.VERSION }}_APK
           path: |
-            Secmail_Reader_Probe_${{ env.VERSION }}/Secmail_Reader_Probe_${{ env.VERSION }}.apk
-            Secmail_Reader_Probe_${{ env.VERSION }}/APK_BADGING.txt
-            Secmail_Reader_Probe_${{ env.VERSION }}/SHA256.txt
+            Secmail_Reader_Probe_${{ env.VERSION }}.apk
+            APK_BADGING.txt
+            SHA256.txt
           if-no-files-found: error
           retention-days: 14
